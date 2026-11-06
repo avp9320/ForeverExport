@@ -145,6 +145,55 @@ local function addProfessions(lines)
     if found == 0 then append(lines, "(none known or API unavailable)") end
 end
 
+local function addTalents(lines)
+    append(lines, "")
+    append(lines, "TALENTS (live character build)")
+    -- The Forever client generally exposes the Classic-style talent API.
+    -- Use a guarded fallback instead of hardcoding a talent tree or guessing
+    -- from the player's level when an API is unavailable.
+    if type(GetNumTalentTabs) ~= "function"
+        or type(GetNumTalents) ~= "function"
+        or type(GetTalentInfo) ~= "function" then
+        append(lines, "(talent API unavailable)")
+        return
+    end
+    local tabCount = safeCall(GetNumTalentTabs)
+    if not valid(tabCount, "number") then
+        append(lines, "(talent trees unavailable)")
+        return
+    end
+    local total = 0
+    for tab = 1, math.min(tabCount, 8) do
+        local tree = safeCall(GetTalentTabInfo, tab)
+        local points = safeCall(GetNumTalents, tab)
+        if valid(points, "number") then
+            local rows, spent = {}, 0
+            for index = 1, math.min(points, 100) do
+                local name, _, _, _, rank, maxRank =
+                    safeCall(GetTalentInfo, tab, index)
+                if valid(name, "string") and valid(rank, "number") and rank > 0 then
+                    spent = spent + rank
+                    local maximum = valid(maxRank, "number") and
+                        ("/" .. tostring(maxRank)) or ""
+                    rows[#rows+1] = "  - " .. clean(name) .. ": " ..
+                        tostring(rank) .. maximum
+                end
+            end
+            total = total + spent
+            if not valid(tree, "string") or tree == "" then
+                tree = "Talent tree " .. tostring(tab)
+            end
+            append(lines, clean(tree) .. ": " .. tostring(spent) .. " points")
+            for _, row in ipairs(rows) do append(lines, row) end
+        end
+    end
+    append(lines, "Total talent points spent: " .. tostring(total))
+    local unspent = safeCall(GetUnspentTalentPoints)
+    if valid(unspent, "number") then
+        append(lines, "Unspent talent points: " .. tostring(unspent))
+    end
+end
+
 local function addQuests(lines)
     append(lines, "")
     append(lines, "ACTIVE QUESTS (live quest log)")
@@ -293,6 +342,7 @@ function Export.BuildReport()
     addCharacter(lines)
     addEquipment(lines)
     addProfessions(lines)
+    addTalents(lines)
     addQuests(lines)
     addRecentTurnins(lines)
     addBags(lines)
