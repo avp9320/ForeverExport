@@ -56,6 +56,24 @@ C_Container = {
     end,
     GetContainerItemInfo = function() return {stackCount=1} end,
 }
+-- Simulate the live Classic-style talent API from the Forever client.
+GetNumTalentTabs = function() return 3 end
+GetTalentTabInfo = function(tab)
+    return ({"Arms", "Fury", "Protection"})[tab]
+end
+GetNumTalents = function(tab) return tab == 1 and 4 or 0 end
+GetTalentInfo = function(tab, index)
+    if tab ~= 1 then return nil end
+    local talents = {
+        {"Improved Heroic Strike", 2, 3},
+        {"Deflection", 0, 5},
+        {"Improved Rend", 3, 3},
+        {"Improved Overpower", 2, 2}
+    }
+    local talent = talents[index]
+    return talent[1], 0, 1, index, talent[2], talent[3]
+end
+GetUnspentTalentPoints = function() return 0 end
 ForeverExportDB = {}
 dofile("ForeverExport.lua")
 local exp = _G.ForeverExport
@@ -70,6 +88,14 @@ assert(report:find("Razor Hill",1,true), "zone")
 assert(report:find("52.2, 43.1",1,true), "position")
 assert(report:find("Large Axe",1,true), "equipped weapon")
 assert(report:find("Mining 20/75",1,true), "profession skill")
+assert(report:find("TALENTS (live character build)",1,true), "talent section")
+assert(report:find("Arms: 7 points",1,true), "tree total")
+assert(report:find("Improved Heroic Strike: 2/3",1,true), "spent talent rank")
+assert(report:find("Improved Rend: 3/3",1,true), "rend talent rank")
+assert(report:find("Improved Overpower: 2/2",1,true), "overpower talent rank")
+assert(not report:find("Deflection: 0/5",1,true), "skip empty talents")
+assert(report:find("Fury: 0 points",1,true), "empty trees still visible")
+assert(report:find("Unspent talent points: 0",1,true), "unspent native total")
 assert(report:find("[1234] L8 Testing Export",1,true), "quest ID and title")
 assert(report:find("[ ] 2/4 Enemies slain",1,true), "unfinished objective")
 assert(report:find("[done] 1/1 Item collected",1,true), "finished objective")
@@ -99,4 +125,11 @@ assert(ForeverExportDB.recentTurnins["Player-test-export"], "own persistent DB")
 report=exp.BuildReport()
 local first=report:find("[9988] An Old Turn-in",1,true)
 assert(not report:find("[9988] An Old Turn-in",first+1,true), "migration deduplicated")
+-- Unsupported talent APIs must not break the character report.
+GetNumTalentTabs = nil
+report=exp.BuildReport()
+assert(report:find("(talent API unavailable)",1,true),
+    "graceful talent API fallback")
+assert(report:find("ACTIVE QUESTS",1,true),
+    "quest reporting survives missing talent API")
 print("ForeverExport standalone smoke test passed")
