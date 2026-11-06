@@ -1,0 +1,114 @@
+name: Package ForeverExport
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '*.lua'
+      - '*.toc'
+      - 'README.md'
+      - 'tests/*.lua'
+      - '.pkgmeta'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate shipped Lua and addon manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lua5.1
+          while IFS= read -r source; do
+            case "$source" in
+              *.lua)
+                test -f "$source" || { echo "Missing addon source: $source" >&2; exit 1; }
+                luac5.1 -p "$source"
+                ;;
+            esac
+          done < <(tr -d '\r' < ForeverExport.toc)
+
+      - name: Test standalone export and migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test in tests/*.lua; do luac5.1 -p "$test"; done
+          lua5.1 tests/export_spec.lua
+
+      - name: Read addon version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(awk '/^## Version:/ {print $3; exit}' ForeverExport.toc)
+          if [ -z "$VERSION" ]; then
+            echo "Could not read version from ForeverExport.toc"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this version already exists
+        id: exists
+        shell: bash
+        run: |
+          TAG='${{ steps.version.outputs.tag }}'
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build installable ZIP
+        if: steps.exists.outputs.exists == 'false'
+        shell: bash
+        run: |
+          VERSION='${{ steps.version.outputs.version }}'
+          mkdir -p package/ForeverExport
+          cp ForeverExport.toc *.lua README.md package/ForeverExport/
+          cd package
+          zip -r "../ForeverExport-v${VERSION}.zip" ForeverExport
+
+      - name: Verify installable release archive
+        if: steps.exists.outputs.exists == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION='${{ steps.version.outputs.version }}'
+          ZIP="ForeverExport-v${VERSION}.zip"
+          unzip -t "$ZIP" >/dev/null
+          for source in ForeverExport/ForeverExport.toc ForeverExport/ForeverExport.lua ForeverExport/README.md; do
+            unzip -Z1 "$ZIP" | grep -Fxq "$source"
+          done
+          if unzip -Z1 "$ZIP" | grep -Eq '^(ForeverQuest|ForeverUpgrade)/'; then
+            echo "Release unexpectedly contains other addon folders." >&2
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          VERSION='${{ steps.version.outputs.version }}'
+          TAG='${{ steps.version.outputs.tag }}'
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "$TAG"
+          gh release create "$TAG" "ForeverExport-v${VERSION}.zip" \
+            --title "ForeverExport v${VERSION}" \
+            --notes "Automated installable release for WoW: Forever."
+
+      - name: Already released
+        if: steps.exists.outputs.exists == 'true'
+        run: echo "Version ${{ steps.version.outputs.version }} already has a release tag; nothing to do."
