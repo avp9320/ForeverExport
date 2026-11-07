@@ -45,6 +45,7 @@ jobs:
           set -euo pipefail
           for test in tests/*.lua; do luac5.1 -p "$test"; done
           lua5.1 tests/export_spec.lua
+          lua5.1 tests/bank_deposit_spec.lua
 
       - name: Read addon version
         id: version
