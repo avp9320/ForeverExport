@@ -37,7 +37,7 @@ local function isReagent(id)
         if ok then class = c end
     end
     if type(class) ~= "number" and type(GetItemInfo) == "function" then
-        local ok, _, _, _, _, _, _, _, _, _, _, c = pcall(GetItemInfo, id)
+        local ok, c = pcall(function() return select(12, GetItemInfo(id)) end)
         if ok then class = c end
     end
     -- Trade Goods includes leather, cloth, ore, herbs and most crafting materials.
