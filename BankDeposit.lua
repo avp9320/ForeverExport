@@ -33,15 +33,21 @@ local function isReagent(id)
     if not id then return false end
     local class
     if type(GetItemInfoInstant) == "function" then
-        local ok, _, _, _, _, c = pcall(GetItemInfoInstant, id)
+        local ok, _, _, _, _, _, c = pcall(GetItemInfoInstant, id)
         if ok then class = c end
     end
     if type(class) ~= "number" and type(GetItemInfo) == "function" then
         local ok, c = pcall(function() return select(12, GetItemInfo(id)) end)
         if ok then class = c end
     end
-    -- Trade Goods includes leather, cloth, ore, herbs and most crafting materials.
-    return class == 7
+    -- The item class is the sixth return of GetItemInfoInstant, not fifth.
+    -- Some Forever builds use a string category from GetItemInfo instead.
+    if class == 7 then return true end
+    if type(GetItemInfo) == "function" then
+        local ok, kind = pcall(function() return select(6, GetItemInfo(id)) end)
+        if ok and (kind == "Trade Goods" or kind == "Tradeskills") then return true end
+    end
+    return false
 end
 local function bankVisible()
     return bankOpen and BankFrame and BankFrame.IsShown and BankFrame:IsShown()
@@ -96,7 +102,7 @@ local function showButton()
     if not button then
         button = CreateFrame("Button", "ForeverExportDepositReagents", BankFrame, "UIPanelButtonTemplate")
         button:SetSize(136, 23)
-        button:SetPoint("TOPRIGHT", BankFrame, "TOPRIGHT", -38, -37)
+        button:SetPoint("TOPRIGHT", BankFrame, "TOPRIGHT", -38, -84)
         button:SetText("Deposit Reagents")
         button:SetScript("OnClick", deposit)
         button:SetScript("OnEnter", function(self)
