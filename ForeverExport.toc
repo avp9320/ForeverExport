@@ -2,7 +2,7 @@
 ## Title: Forever Export
 ## Notes: Standalone, manual character report export for WoW: Forever.
 ## Author: avp9320 + ChatGPT
-## Version: 0.1.4
+## Version: 0.1.5
 ## SavedVariables: ForeverExportDB
 
 ForeverExport.lua
