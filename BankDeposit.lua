@@ -102,7 +102,7 @@ local function showButton()
     if not button then
         button = CreateFrame("Button", "ForeverExportDepositReagents", BankFrame, "UIPanelButtonTemplate")
         button:SetSize(136, 23)
-        button:SetPoint("TOPRIGHT", BankFrame, "TOPRIGHT", -38, -84)
+        button:SetPoint("TOPLEFT", BankFrame, "TOPLEFT", 187, -59)
         button:SetText("Deposit Reagents")
         button:SetScript("OnClick", deposit)
         button:SetScript("OnEnter", function(self)
