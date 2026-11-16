@@ -148,13 +148,137 @@ end
 local function addTalents(lines)
     append(lines, "")
     append(lines, "TALENTS (live character build)")
-    -- The Forever client generally exposes the Classic-style talent API.
-    -- Use a guarded fallback instead of hardcoding a talent tree or guessing
-    -- from the player's level when an API is unavailable.
+
+    -- WoW Forever uses Retail's C_Traits system rather than Classic's
+    -- GetTalentInfo globals. Prefer C_Traits when a combat config is present.
+    local traits = C_Traits
+    local specs = C_SpecializationInfo
+    if traits and type(traits.GetConfigInfo) == "function"
+        and type(traits.GetTreeNodes) == "function"
+        and type(traits.GetNodeInfo) == "function" then
+        local configID
+        if specs and type(specs.GetActiveSpecGroup) == "function"
+            and type(specs.GetCombatConfigIDForSpecGroup) == "function" then
+            local group = safeCall(specs.GetActiveSpecGroup)
+            if valid(group, "number") then
+                configID = safeCall(specs.GetCombatConfigIDForSpecGroup, group)
+            end
+        end
+        if not valid(configID, "number") or configID <= 0 then
+            configID = safeCall(C_ClassTalents and C_ClassTalents.GetActiveConfigID)
+        end
+        if valid(configID, "number") and configID > 0 then
+            local config = safeCall(traits.GetConfigInfo, configID)
+            local treeIDs = type(config) == "table" and not isSecret(config)
+                and config.treeIDs or nil
+            if type(treeIDs) == "table" and not isSecret(treeIDs) then
+                local learned, total, seen = {}, 0, {}
+                for _, treeID in ipairs(treeIDs) do
+                    if valid(treeID, "number") then
+                        local nodeIDs = safeCall(traits.GetTreeNodes, treeID)
+                        if type(nodeIDs) == "table" and not isSecret(nodeIDs) then
+                            for _, nodeID in ipairs(nodeIDs) do
+                                if valid(nodeID, "number") and not seen[nodeID] then
+                                    seen[nodeID] = true
+                                    local node = safeCall(traits.GetNodeInfo, configID, nodeID)
+                                    if type(node) == "table" and not isSecret(node) then
+                                        local rank = node.activeRank
+                                        if not valid(rank, "number") then rank = node.currentRank end
+                                        if valid(rank, "number") and rank > 0 then
+                                            local maxRank = valid(node.maxRanks, "number")
+                                                and node.maxRanks or rank
+                                            local active = node.activeEntry
+                                            local entryID = type(active) == "table"
+                                                and not isSecret(active) and active.entryID or nil
+                                            if not valid(entryID, "number")
+                                                and type(node.entryIDsWithCommittedRanks) == "table"
+                                                and not isSecret(node.entryIDsWithCommittedRanks) then
+                                                entryID = node.entryIDsWithCommittedRanks[1]
+                                            end
+                                            if not valid(entryID, "number")
+                                                and type(node.entryIDs) == "table"
+                                                and not isSecret(node.entryIDs) then
+                                                entryID = node.entryIDs[1]
+                                            end
+                                            local entry = valid(entryID, "number")
+                                                and safeCall(traits.GetEntryInfo, configID, entryID) or nil
+                                            local definition = type(entry) == "table"
+                                                and not isSecret(entry)
+                                                and valid(entry.definitionID, "number")
+                                                and safeCall(traits.GetDefinitionInfo, entry.definitionID) or nil
+                                            local spellID = type(definition) == "table"
+                                                and not isSecret(definition) and definition.spellID or nil
+                                            local name = type(definition) == "table"
+                                                and not isSecret(definition) and definition.overrideName or nil
+                                            if not valid(name, "string") or name == "" then
+                                                name = valid(spellID, "number")
+                                                    and safeCall(C_Spell and C_Spell.GetSpellName, spellID) or nil
+                                            end
+                                            if not valid(name, "string") or name == "" then
+                                                local spell = valid(spellID, "number")
+                                                    and safeCall(C_Spell and C_Spell.GetSpellInfo, spellID) or nil
+                                                name = type(spell) == "table" and not isSecret(spell)
+                                                    and spell.name or nil
+                                            end
+                                            if not valid(name, "string") or name == "" then
+                                                name = "Talent node " .. tostring(nodeID)
+                                            end
+                                            learned[#learned+1] = {
+                                                name = clean(name), rank = rank, maxRank = maxRank,
+                                                y = valid(node.posY, "number") and node.posY or 0,
+                                                x = valid(node.posX, "number") and node.posX or 0,
+                                            }
+                                            total = total + rank
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+                table.sort(learned, function(a, b)
+                    if a.x ~= b.x then return a.x < b.x end
+                    if a.y ~= b.y then return a.y < b.y end
+                    return a.name < b.name
+                end)
+                -- Spec summaries provide the named Arms/Fury/Protection point
+                -- totals without guessing the three-pane geometry.
+                local summaryFound = false
+                if specs and type(specs.GetSpecializationInfo) == "function" then
+                    for index = 1, 3 do
+                        local _, name, _, _, _, _, points =
+                            safeCall(specs.GetSpecializationInfo, index)
+                        if valid(name, "string") and valid(points, "number") then
+                            append(lines, clean(name) .. ": " .. tostring(points) .. " points")
+                            summaryFound = true
+                        end
+                    end
+                end
+                if #learned > 0 then
+                    append(lines, "Learned talents:")
+                    for _, talent in ipairs(learned) do
+                        append(lines, "  - " .. talent.name .. ": "
+                            .. tostring(talent.rank) .. "/" .. tostring(talent.maxRank))
+                    end
+                    append(lines, "Total learned talent ranks: " .. tostring(total))
+                    local unspent = safeCall(GetUnspentTalentPoints)
+                    if valid(unspent, "number") then
+                        append(lines, "Unspent talent points: " .. tostring(unspent))
+                    end
+                    return
+                elseif summaryFound then
+                    append(lines, "(no learned talent nodes returned; verify in-game)")
+                    return
+                end
+            end
+        end
+    end
+
+    -- Classic API fallback for other supported clients.
     if type(GetNumTalentTabs) ~= "function"
         or type(GetNumTalents) ~= "function"
         or type(GetTalentInfo) ~= "function" then
-        append(lines, "(talent API unavailable)")
+        append(lines, "(talent data unavailable: no readable talent config)")
         return
     end
     local tabCount = safeCall(GetNumTalentTabs)
