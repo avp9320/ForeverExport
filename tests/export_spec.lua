@@ -152,7 +152,7 @@ C_Traits = {
     end,
 }
 C_Spell = {GetSpellName = function(spellID)
-    return ({[501]="Enrage",[502]="Bloodthirst"})[spellID]
+    return ({[401]="Enrage",[402]="Bloodthirst"})[spellID]
 end}
 report=exp.BuildReport()
 assert(report:find("Enrage: 3/5",1,true), "Forever trait rank")
