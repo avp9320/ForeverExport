@@ -128,8 +128,34 @@ assert(not report:find("[9988] An Old Turn-in",first+1,true), "migration dedupli
 -- Unsupported talent APIs must not break the character report.
 GetNumTalentTabs = nil
 report=exp.BuildReport()
-assert(report:find("(talent API unavailable)",1,true),
+assert(report:find("(talent data unavailable: no readable talent config)",1,true),
     "graceful talent API fallback")
 assert(report:find("ACTIVE QUESTS",1,true),
     "quest reporting survives missing talent API")
+
+-- Forever-style trait system: export committed talent names and rank values.
+C_ClassTalents = {GetActiveConfigID = function() return 42 end}
+C_Traits = {
+    GetConfigInfo = function() return {treeIDs={1}} end,
+    GetTreeNodes = function() return {101,102} end,
+    GetNodeInfo = function(_, nodeID)
+        if nodeID == 101 then
+            return {activeRank=3,maxRanks=5,activeEntry={entryID=201},posX=1,posY=1}
+        end
+        return {activeRank=1,maxRanks=1,activeEntry={entryID=202},posX=1,posY=2}
+    end,
+    GetEntryInfo = function(_, entryID)
+        return {definitionID=entryID+100}
+    end,
+    GetDefinitionInfo = function(definitionID)
+        return {spellID=definitionID+100}
+    end,
+}
+C_Spell = {GetSpellName = function(spellID)
+    return ({[501]="Enrage",[502]="Bloodthirst"})[spellID]
+end}
+report=exp.BuildReport()
+assert(report:find("Enrage: 3/5",1,true), "Forever trait rank")
+assert(report:find("Bloodthirst: 1/1",1,true), "Forever trait name")
+assert(report:find("Total learned talent ranks: 4",1,true), "trait rank total")
 print("ForeverExport standalone smoke test passed")
