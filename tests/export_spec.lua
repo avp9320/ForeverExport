@@ -97,6 +97,26 @@ assert(report:find("Large Axe",1,true), "equipped weapon")
 assert(report:find("Melee Attack Power: 712",1,true), "live attack power")
 assert(report:find("Maces 230/235; Swords 229/235",1,true),
     "weapon skill snapshot")
+-- WoW Forever exposes skills through C_SkillInfo, without Classic globals.
+C_SkillInfo = {
+    GetSkillLineInfoByID = function(id)
+        if id == 43 then
+            return {skillID=43, name="Swords", rank=229, maxRank=235}
+        end
+        if id == 54 then
+            return {skillID=54, name="Maces", rank=230, maxRank=235}
+        end
+        -- Untrained weapon skills should not be exported.
+        return {skillID=id, rank=0, maxRank=235}
+    end,
+}
+GetNumSkillLines, GetSkillLineInfo = nil, nil
+report = exp.BuildReport()
+assert(report:find("Swords 229/235; Maces 230/235",1,true),
+    "Forever C_SkillInfo weapon skill snapshot")
+assert(not report:find("Weapon Skills: unavailable",1,true),
+    "modern weapon skill API used")
+
 assert(report:find("Mining 20/75",1,true), "profession skill")
 assert(report:find("TALENTS (live character build)",1,true), "talent section")
 assert(report:find("Arms: 7 points",1,true), "tree total")
@@ -173,8 +193,14 @@ C_Traits = {
 C_Spell = {GetSpellName = function(spellID)
     return ({[401]="Enrage",[402]="Bloodthirst"})[spellID]
 end}
+-- Forever's specialization metadata must not masquerade as point totals.
+C_SpecializationInfo = {
+    GetSpecializationInfo = function() return 100, "Warrior", nil, nil, nil, nil, 0 end,
+}
 report=exp.BuildReport()
 assert(report:find("Enrage: 3/5",1,true), "Forever trait rank")
+assert(not report:find("Warrior: 0 points",1,true),
+    "do not export unrelated specialization values as talent points")
 assert(report:find("Bloodthirst: 1/1",1,true), "Forever trait name")
 assert(report:find("Total learned talent ranks: 4",1,true), "trait rank total")
 print("ForeverExport standalone smoke test passed")
