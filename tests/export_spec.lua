@@ -18,6 +18,13 @@ UnitXP = function() return 1991 end
 UnitXPMax = function() return 4500 end
 GetRealmName = function() return "Forever" end
 GetMoney = function() return 206 end
+UnitAttackPower = function() return 600, 120, -8 end
+GetNumSkillLines = function() return 3 end
+GetSkillLineInfo = function(index)
+    if index == 1 then return "Weapons", true, false, 0, 0, 0, 0 end
+    if index == 2 then return "Maces", false, false, 230, 0, 0, 235 end
+    return "Swords", false, false, 229, 0, 0, 235
+end
 GetZoneText = function() return "Durotar" end
 GetSubZoneText = function() return "Razor Hill" end
 GetInventoryItemLink = function(_, slot)
@@ -87,6 +94,9 @@ assert(report:find("1991 / 4500",1,true), "xp")
 assert(report:find("Razor Hill",1,true), "zone")
 assert(report:find("52.2, 43.1",1,true), "position")
 assert(report:find("Large Axe",1,true), "equipped weapon")
+assert(report:find("Melee Attack Power: 712",1,true), "live attack power")
+assert(report:find("Maces 230/235; Swords 229/235",1,true),
+    "weapon skill snapshot")
 assert(report:find("Mining 20/75",1,true), "profession skill")
 assert(report:find("TALENTS (live character build)",1,true), "talent section")
 assert(report:find("Arms: 7 points",1,true), "tree total")
@@ -99,6 +109,15 @@ assert(report:find("Unspent talent points: 0",1,true), "unspent native total")
 assert(report:find("[1234] L8 Testing Export",1,true), "quest ID and title")
 assert(report:find("[ ] 2/4 Enemies slain",1,true), "unfinished objective")
 assert(report:find("[done] 1/1 Item collected",1,true), "finished objective")
+-- A turn-in-ready quest may still expose unfinished/stale objective flags.
+C_QuestLog.IsComplete = function() return true end
+report = exp.BuildReport()
+assert(report:find("[1234] L8 Testing Export [READY TO TURN IN]",1,true),
+    "quest-level completion is authoritative")
+assert(report:find("[note] The game marks this quest complete;",1,true),
+    "avoid interpreting unchecked objectives as an incomplete quest")
+C_QuestLog.IsComplete = function() return false end
+report = exp.BuildReport()
 assert(report:find("Mining Pick x1",1,true), "bag inventory")
 assert(observer.event == "QUEST_TURNED_IN", "turnin observer")
 observer.OnEvent(observer, "QUEST_TURNED_IN", 9876)
