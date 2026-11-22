@@ -7,8 +7,8 @@ _G.ForeverExport = Export
 
 local function safeCall(fn, ...)
     if type(fn) ~= "function" then return nil end
-    local ok, a, b, c, d, e, f = pcall(fn, ...)
-    if ok then return a, b, c, d, e, f end
+    local ok, a, b, c, d, e, f, g, h = pcall(fn, ...)
+    if ok then return a, b, c, d, e, f, g, h end
 end
 
 local function isSecret(value)
