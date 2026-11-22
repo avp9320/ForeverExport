@@ -117,6 +117,51 @@ local function addEquipment(lines)
     if found == 0 then append(lines, "(none found or equipment API unavailable)") end
 end
 
+local WEAPON_SKILL_NAMES = {
+    ["Swords"] = true, ["Maces"] = true, ["Axes"] = true,
+    ["Daggers"] = true, ["Fist Weapons"] = true, ["Unarmed"] = true,
+    ["Two-Handed Swords"] = true, ["Two-Handed Maces"] = true,
+    ["Two-Handed Axes"] = true, ["One-Handed Swords"] = true,
+    ["One-Handed Maces"] = true, ["One-Handed Axes"] = true,
+    ["Polearms"] = true, ["Staves"] = true, ["Bows"] = true,
+    ["Guns"] = true, ["Crossbows"] = true, ["Thrown"] = true,
+    ["Wands"] = true,
+}
+
+local function addCombat(lines)
+    append(lines, "")
+    append(lines, "COMBAT SNAPSHOT (live values, if available)")
+    local base, bonus, penalty = safeCall(UnitAttackPower, "player")
+    if valid(base, "number") then
+        local attackPower = base
+            + (valid(bonus, "number") and bonus or 0)
+            + (valid(penalty, "number") and penalty or 0)
+        append(lines, "Melee Attack Power: " .. tostring(math.floor(attackPower)))
+    end
+    -- The legacy skill-line API is available in some Forever client versions.
+    -- Report only trained weapon skills; don't invent values if unavailable.
+    local count = safeCall(GetNumSkillLines)
+    local skills = {}
+    if valid(count, "number") then
+        for index = 1, math.min(count, 256) do
+            local name, isHeader, _, rank, _, _, maximum =
+                safeCall(GetSkillLineInfo, index)
+            if valid(name, "string") and WEAPON_SKILL_NAMES[name]
+                and isHeader ~= true and valid(rank, "number")
+                and rank > 0 and valid(maximum, "number") then
+                skills[#skills + 1] = clean(name) .. " "
+                    .. tostring(rank) .. "/" .. tostring(maximum)
+            end
+        end
+    end
+    if #skills > 0 then
+        append(lines, "Weapon Skills: " .. table.concat(skills, "; "))
+    end
+    if not valid(base, "number") and #skills == 0 then
+        append(lines, "(combat APIs unavailable; no values inferred)")
+    end
+end
+
 local function addProfessions(lines)
     append(lines, "")
     append(lines, "PROFESSIONS")
@@ -347,6 +392,7 @@ local function addQuests(lines)
                     and ("L" .. tostring(info.level) .. " ") or ""
                 append(lines, string.format("- [%d] %s%s%s", id, level,
                     clean(title), complete and " [READY TO TURN IN]" or ""))
+                local hasUncheckedObjectives = false
                 local objectives = safeCall(api.GetQuestObjectives, id)
                 if type(objectives) == "table" and not isSecret(objectives) then
                     for _, objective in ipairs(objectives) do
@@ -355,11 +401,16 @@ local function addQuests(lines)
                             if valid(description, "string") and description ~= "" then
                                 local done = objective.finished == true
                                     or objective.isFinished == true
+                                if not done then hasUncheckedObjectives = true end
                                 append(lines, "    " .. (done and "[done] " or "[ ] ")
                                     .. clean(description))
                             end
                         end
                     end
+                end
+                if complete and hasUncheckedObjectives then
+                    append(lines, "    [note] The game marks this quest complete; "
+                        .. "objective flags may still be unchecked.")
                 end
             end
         end
@@ -465,6 +516,7 @@ function Export.BuildReport()
     local lines = {"FOREVER CHARACTER REPORT v2", "Manual export - no automatic sharing"}
     addCharacter(lines)
     addEquipment(lines)
+    addCombat(lines)
     addProfessions(lines)
     addTalents(lines)
     addQuests(lines)
