@@ -63,7 +63,11 @@ local function addCharacter(lines)
     local race = safeCall(UnitRace, "player") or "Unknown"
     local class = safeCall(UnitClass, "player") or "Unknown"
     local level = safeCall(UnitLevel, "player")
-    local realm = safeCall(GetRealmName) or "Unknown"
+    local realm = safeCall(GetRealmName)
+    if not valid(realm, "string") or realm == "" then
+        realm = safeCall(GetNormalizedRealmName)
+    end
+    if not valid(realm, "string") or realm == "" then realm = "unavailable" end
     append(lines, "Character: " .. clean(name) .. " - " .. clean(race)
         .. " " .. clean(class) .. " (level " .. clean(level) .. ")")
     append(lines, "Realm: " .. clean(realm))
@@ -128,6 +132,21 @@ local WEAPON_SKILL_NAMES = {
     ["Wands"] = true,
 }
 
+-- WoW Forever uses C_SkillInfo instead of the Classic skill-line globals.
+-- IDs are from Forever's skill lines, avoiding localization or collapsed headers.
+local WEAPON_SKILL_LINES = {
+    {43, "Swords"}, {54, "Maces"}, {44, "Axes"},
+    {173, "Daggers"}, {55, "Two-Handed Swords"},
+    {160, "Two-Handed Maces"}, {172, "Two-Handed Axes"},
+    {229, "Polearms"}, {136, "Staves"}, {162, "Fist Weapons"},
+    {45, "Bows"}, {46, "Guns"}, {226, "Crossbows"},
+    {176, "Thrown"}, {228, "Wands"},
+}
+local WEAPON_SKILL_ID_SET = {}
+for _, skill in ipairs(WEAPON_SKILL_LINES) do
+    WEAPON_SKILL_ID_SET[skill[1]] = true
+end
+
 local function addCombat(lines)
     append(lines, "")
     append(lines, "COMBAT SNAPSHOT (live values, if available)")
@@ -138,27 +157,69 @@ local function addCombat(lines)
             + (valid(penalty, "number") and penalty or 0)
         append(lines, "Melee Attack Power: " .. tostring(math.floor(attackPower)))
     end
-    -- The legacy skill-line API is available in some Forever client versions.
-    -- Report only trained weapon skills; don't invent values if unavailable.
-    local count = safeCall(GetNumSkillLines)
-    local skills = {}
-    if valid(count, "number") then
-        for index = 1, math.min(count, 256) do
-            local name, isHeader, _, rank, _, _, maximum =
-                safeCall(GetSkillLineInfo, index)
-            if valid(name, "string") and WEAPON_SKILL_NAMES[name]
-                and isHeader ~= true and valid(rank, "number")
-                and rank > 0 and valid(maximum, "number") then
-                skills[#skills + 1] = clean(name) .. " "
-                    .. tostring(rank) .. "/" .. tostring(maximum)
+
+    local skills, seen = {}, {}
+    local function recordSkill(name, rank, maxRank, skillID)
+        if not valid(name, "string") or name == ""
+            or not valid(rank, "number") or rank <= 0
+            or not valid(maxRank, "number") or maxRank <= 0 then return end
+        local key = valid(skillID, "number") and skillID or name
+        if seen[key] then return end
+        seen[key] = true
+        skills[#skills + 1] = clean(name) .. " "
+            .. tostring(rank) .. "/" .. tostring(maxRank)
+    end
+
+    local api = C_SkillInfo
+    if api and type(api.GetSkillLineInfoByID) == "function" then
+        for _, skill in ipairs(WEAPON_SKILL_LINES) do
+            local info = safeCall(api.GetSkillLineInfoByID, skill[1])
+            if type(info) == "table" and not isSecret(info) then
+                local name = valid(info.name, "string") and info.name ~= ""
+                    and info.name or skill[2]
+                recordSkill(name, info.rank, info.maxRank, skill[1])
+            end
+        end
+    end
+    -- Support clients where enumeration works but direct ID lookup does not.
+    if #skills == 0 and api and type(api.GetNumSkillLines) == "function"
+        and type(api.GetSkillLineInfo) == "function" then
+        local count = safeCall(api.GetNumSkillLines)
+        if valid(count, "number") then
+            for index = 1, math.min(count, 256) do
+                local info = safeCall(api.GetSkillLineInfo, index)
+                if type(info) == "table" and not isSecret(info)
+                    and info.isHeader ~= true then
+                    local name = info.name
+                    if WEAPON_SKILL_ID_SET[info.skillID]
+                        or (valid(name, "string") and WEAPON_SKILL_NAMES[name]) then
+                        recordSkill(name, info.rank, info.maxRank, info.skillID)
+                    end
+                end
+            end
+        end
+    end
+    -- Classic fallback. Forever normally does not expose these global APIs.
+    if #skills == 0 then
+        local count = safeCall(GetNumSkillLines)
+        if valid(count, "number") then
+            for index = 1, math.min(count, 256) do
+                local name, isHeader, _, rank, _, _, maximum =
+                    safeCall(GetSkillLineInfo, index)
+                if valid(name, "string") and WEAPON_SKILL_NAMES[name]
+                    and isHeader ~= true then
+                    recordSkill(name, rank, maximum)
+                end
             end
         end
     end
     if #skills > 0 then
         append(lines, "Weapon Skills: " .. table.concat(skills, "; "))
+    else
+        append(lines, "Weapon Skills: unavailable from game API")
     end
-    if not valid(base, "number") and #skills == 0 then
-        append(lines, "(combat APIs unavailable; no values inferred)")
+    if not valid(base, "number") then
+        append(lines, "Melee Attack Power: unavailable from game API")
     end
 end
 
@@ -286,19 +347,9 @@ local function addTalents(lines)
                     if a.y ~= b.y then return a.y < b.y end
                     return a.name < b.name
                 end)
-                -- Spec summaries provide the named Arms/Fury/Protection point
-                -- totals without guessing the three-pane geometry.
-                local summaryFound = false
-                if specs and type(specs.GetSpecializationInfo) == "function" then
-                    for index = 1, 3 do
-                        local _, name, _, _, _, _, points =
-                            safeCall(specs.GetSpecializationInfo, index)
-                        if valid(name, "string") and valid(points, "number") then
-                            append(lines, clean(name) .. ": " .. tostring(points) .. " points")
-                            summaryFound = true
-                        end
-                    end
-                end
+                -- GetSpecializationInfo describes specializations, not the
+                -- spent points in Forever's classic-style talent trees.
+                -- Do not print misleading summaries such as "Warrior: 0 points".
                 if #learned > 0 then
                     append(lines, "Learned talents:")
                     for _, talent in ipairs(learned) do
@@ -311,7 +362,7 @@ local function addTalents(lines)
                         append(lines, "Unspent talent points: " .. tostring(unspent))
                     end
                     return
-                elseif summaryFound then
+                else
                     append(lines, "(no learned talent nodes returned; verify in-game)")
                     return
                 end
